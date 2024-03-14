@@ -9,11 +9,9 @@ import time
 from Crypto.Signature import pkcs1_15
 from Crypto.Hash import SHA256
 from Crypto.PublicKey import RSA
-import os
 import platform
 import subprocess
 
-# import pdb; pdb.set_trace()
 class FilePickerApp:
     def __init__(self, master):
         self.master = master
@@ -55,7 +53,7 @@ class FilePickerApp:
     def open_file_picker(self):
         file_path = filedialog.askopenfilename(filetypes=[("Excel Sheet", "*.xlsx")])
         if file_path:
-            print(f"Selected file: {file_path}")
+            # print(f"Selected file: {file_path}")
             # Disable the file picker button during processing
             self.pick_button.config(state=tk.DISABLED)
             # Show the completion label
@@ -69,20 +67,23 @@ class FilePickerApp:
             # Split UPCs into batches of 20
             upc_batches = [df['UPC'][i:i + 20] for i in range(0, len(df['UPC']), 20)]
 
+            result_df = pd.DataFrame(columns=['UPC', 'Name'])  # Initialize result DataFrame
+
             # Completion percentage initialization
             total_batches = len(upc_batches)
             completed_batches = 0
 
             for i, batch in enumerate(upc_batches):
                 result_data = self.get_walmart_data_batch(batch)
-                df = pd.concat([df, result_data], axis=1)
+                # Concatenate result data next to the corresponding UPC entry
+                result_df_batch = pd.DataFrame({"UPC": batch, "Name": result_data})
+                result_df = pd.concat([result_df, result_df_batch], ignore_index=True)
                 completed_batches += 1
                 completion_percentage = (completed_batches / total_batches) * 100
                 self.update_completion(completion_percentage)
 
-            # Merge the result data with the original DataFrame
             self.complete_completion()
-            self.prompt_completion(df, input_file_path)
+            self.prompt_completion(result_df, input_file_path)
 
         except Exception as e:
             print(f"Error processing Excel file: {e}")
@@ -99,7 +100,7 @@ class FilePickerApp:
         self.master.update_idletasks()
 
     def prompt_completion(self, df, input_file_path):
-        response = messagebox.askyesno("Processing Complete", "Do you want to open the processed file?")
+        response = messagebox.askyesno("Processing Completed", "Do you want to open the processed file?")
         if response:
             self.open_processed_file(df, input_file_path)
 
@@ -112,7 +113,7 @@ class FilePickerApp:
             f"{file_name}-processed-at-{timestamp}{file_extension}"
         )
         df.to_excel(output_file_path, index=False)
-        print(f"Updated data saved to {output_file_path}")
+        # print(f"Updated data saved to {output_file_path}")
 
         # Open the processed file
         self.open_file(output_file_path)
@@ -175,29 +176,23 @@ class FilePickerApp:
         # Make the API request here for the entire batch
         api_url = f"{base_url}?upc={','.join(upc_batch)}"
         response = requests.get(api_url, headers=headers)
-        print(response.json())
         if response.status_code == 200:
             # Extract relevant information from the response JSON
-            result_data = self.extract_walmart_data(response.json())
+            result_data = self.extract_walmart_data(response.json(), upc_batch)
             return result_data
         else:
-            # If there's an error, return a DataFrame with "not found" for each entry
-            return pd.DataFrame({"Name": ["not found"] * len(upc_batch)})
+            # If there's an error, return a list of "not found" for each UPC
+            return ["not found"] * len(upc_batch)
 
-    def extract_walmart_data(self, json_response):
+    def extract_walmart_data(self, json_response, upc_batch):
         items = json_response.get("items", [])
-        result_data = pd.DataFrame({
-            "Name": [item.get("name", "not found") for item in items],
-            # Add other fields as needed
-        })
+        result_data = [next((item.get("name", "not found") for item in items if item["upc"] == upc), "not found") for upc in upc_batch]
         return result_data
-
 
 def main():
     root = tk.Tk()
     app = FilePickerApp(root)
     root.mainloop()
-
 
 if __name__ == "__main__":
     main()
